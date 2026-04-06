@@ -54,6 +54,7 @@ class LoopConfig:
     claim_embed_similarity: float = 0.92
     question_lexical_prefilter: float = 0.45
     claim_lexical_prefilter: float = 0.45
+    artifact_dedup_reject_threshold: float = 0.85
     registry_match_threshold: float = 0.72
     registry_meaning_conflict_threshold: float = 0.45
     registry_name_weight: float = 0.6
@@ -130,6 +131,8 @@ class StrictModel(BaseModel):
 
 
 StructuredSchema = TypeVar("StructuredSchema", bound=StrictModel)
+EvidenceType = Literal["conjecture", "mechanism", "synthesis", "mixed", "evidence-backed"]
+EvidenceStrength = Literal["unknown", "low", "mixed", "moderate", "high"]
 
 
 # -------------------------
@@ -183,6 +186,11 @@ class Artifact(StrictModel):
     parents: List[str] = Field(default_factory=list)
     references: List[str] = Field(default_factory=list)
     referenced_definition_ids: List[str] = Field(default_factory=list)
+    evidence_type: EvidenceType = "synthesis"
+    evidence_strength: EvidenceStrength = "unknown"
+    assumptions: List[str] = Field(default_factory=list)
+    competing_hypothesis: str = ""
+    main_failure_case: str = ""
 
     score1: float = 0.0
     score2: float = 0.0
@@ -214,6 +222,11 @@ class Draft(StrictModel):
     claims: List[Claim] = Field(default_factory=list)
     parents: List[str] = Field(default_factory=list)
     references: List[str] = Field(default_factory=list)
+    evidence_type: EvidenceType = "synthesis"
+    evidence_strength: EvidenceStrength = "unknown"
+    assumptions: List[str] = Field(default_factory=list)
+    competing_hypothesis: str = ""
+    main_failure_case: str = ""
 
 
 class Score(StrictModel):
@@ -424,6 +437,10 @@ def context_blob(state: State) -> str:
                 "answer": a.answer[:1500],
                 "claims": [c.text for c in a.claims[:5]],
                 "definitions": [d.name for d in a.definitions[:5]],
+                "evidence_type": a.evidence_type,
+                "evidence_strength": a.evidence_strength,
+                "competing_hypothesis": a.competing_hypothesis[:240],
+                "main_failure_case": a.main_failure_case[:240],
                 "fate": a.fate,
                 "reuse": a.reuse,
             }
@@ -484,6 +501,12 @@ Rules:
 - parents must be selected from known artifact ids
 - references must be selected from known claim ids
 - if no lineage applies, use empty arrays
+- classify the answer honestly as conjecture, mechanism, synthesis, mixed, or evidence-backed
+- set evidence strength realistically; prefer lower confidence labels when support is thin
+- list the main assumptions that would have to hold
+- include one serious competing hypothesis or alternative explanation
+- include one main failure case or boundary condition
+- do not present speculation as established evidence
 
 {topic_seed_prompt(state)}
 
@@ -656,6 +679,11 @@ def sanitize_draft(state: State, d: Draft) -> tuple[Draft, float]:
     deduped_claims, c_pen = dedup_claims(state, d.claims)
     cleaned = d.model_copy(update={"claims": deduped_claims})
     return cleaned, max(q_pen, c_pen)
+
+
+def should_reject_draft(dedup: float) -> bool:
+    """Drop near-clones before they enter long-lived state."""
+    return dedup >= CONFIG.artifact_dedup_reject_threshold
 
 
 # -------------------------
@@ -986,6 +1014,11 @@ def materialize_artifact(draft: Draft, evaluation: DraftEvaluation) -> Artifact:
         claims=draft.claims,
         parents=draft.parents,
         references=draft.references,
+        evidence_type=draft.evidence_type,
+        evidence_strength=draft.evidence_strength,
+        assumptions=draft.assumptions,
+        competing_hypothesis=draft.competing_hypothesis,
+        main_failure_case=draft.main_failure_case,
         score1=evaluation.score1,
         score2=evaluation.score2,
         adversarial=evaluation.adversarial,
@@ -996,17 +1029,19 @@ def materialize_artifact(draft: Draft, evaluation: DraftEvaluation) -> Artifact:
     return artifact
 
 
-def process_question(state: State, question: Question) -> Artifact:
+def process_question(state: State, question: Question) -> tuple[Optional[Artifact], float]:
     """Execute the full per-question pipeline and append the surviving artifact."""
     draft = gen_artifact(state, question)
     draft, dedup = sanitize_draft(state, draft)
     evaluation = evaluate_draft(draft, state, dedup)
+    if should_reject_draft(evaluation.dedup):
+        return None, evaluation.dedup
     artifact = materialize_artifact(draft, evaluation)
 
     register_defs(state, artifact)
     apply_reuse_tracking(state, artifact)
     state.artifacts.append(artifact)
-    return artifact
+    return artifact, evaluation.dedup
 
 
 def format_artifact_progress(artifact: Artifact) -> str:
@@ -1014,6 +1049,14 @@ def format_artifact_progress(artifact: Artifact) -> str:
     return (
         f"{artifact.question.text} -> "
         f"fate={artifact.fate:.3f} dedup={artifact.dedup:.3f}"
+    )
+
+
+def format_rejected_progress(question: Question, dedup: float) -> str:
+    """Stable progress line for rejected near-duplicate drafts."""
+    return (
+        f"{question.text} -> "
+        f"rejected dedup={dedup:.3f} threshold={CONFIG.artifact_dedup_reject_threshold:.2f}"
     )
 
 
@@ -1036,8 +1079,11 @@ def run_iteration(state: State, git: bool = False, render_graph: bool = True) ->
 
     for question in questions:
         try:
-            artifact = process_question(state, question)
-            print(format_artifact_progress(artifact))
+            artifact, dedup = process_question(state, question)
+            if artifact is None:
+                print(format_rejected_progress(question, dedup))
+            else:
+                print(format_artifact_progress(artifact))
         except Exception as e:
             print(f"artifact failed: {e}")
 

@@ -39,6 +39,10 @@ It contains:
 - `registry`: reusable definitions discovered during the run
 - optional `seed`: topic guidance for that exploration
 
+Newer runs may also persist extra epistemic fields on artifacts, such as
+evidence type, evidence strength, assumptions, a competing hypothesis, and a
+main failure case. Older state files without these fields still load normally.
+
 Important behavior:
 
 - a world state is a working set, not a permanent archive of everything ever generated
