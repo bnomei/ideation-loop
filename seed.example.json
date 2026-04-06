@@ -1,0 +1,27 @@
+{
+  "topic": "Trust calibration for medical advice without visible chain-of-thought",
+  "goal": "Explore brief answer-level summaries and verification prompts as safer alternatives to visible reasoning traces.",
+  "include": [
+    "non-expert users",
+    "verification scaffolds",
+    "uncertainty cues"
+  ],
+  "avoid": [
+    "broad AGI safety",
+    "general philosophy of mind"
+  ],
+  "seed_questions": [
+    "Do short contrastive summaries calibrate trust better than full chain-of-thought?",
+    "Which verification prompts actually increase external checking in safety-relevant tasks?"
+  ],
+  "seed_definitions": [
+    {
+      "name": "verification scaffold",
+      "meaning": "A lightweight interface element that helps a user check an answer with an external calculation, source, or checklist."
+    },
+    {
+      "name": "trust calibration",
+      "meaning": "The degree to which a user's reliance on the model matches the model's real accuracy and limitations."
+    }
+  ]
+}

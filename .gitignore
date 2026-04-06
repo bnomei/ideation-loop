@@ -201,7 +201,19 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# Local runtime artifacts
+world_state.json
+lineage_graph.png
+
 # Marimo
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# states
+states/*.png
+
+.DS_Store
+
+world_state.json
+lineage_graph.png

@@ -1,0 +1,15 @@
+[project]
+name = "knowledge-loop"
+version = "0.1.0"
+description = "Minimal OpenAI-backed research loop runner"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "matplotlib>=3.7.0",
+    "networkx>=3.0",
+    "openai>=1.0.0",
+    "pydantic>=2.0.0",
+]
+
+[tool.uv]
+package = false
