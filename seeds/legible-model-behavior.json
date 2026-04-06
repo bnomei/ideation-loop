@@ -1,0 +1,29 @@
+{
+  "topic": "Legible model behavior for agentic systems",
+  "goal": "Study whether clear behavior policies improve trust, override handling, and perceived fairness when assistants take, constrain, or refuse actions.",
+  "include": [
+    "chain of command",
+    "hard rules vs defaults",
+    "user-visible behavior policies",
+    "ambiguity resolution",
+    "side-effect control"
+  ],
+  "avoid": [
+    "broad AGI philosophy",
+    "benchmark-only evaluations"
+  ],
+  "seed_questions": [
+    "Do public behavior specs reduce user surprise when assistants decline, defer, or constrain actions?",
+    "Which parts of a behavior policy need to be visible to users to improve trust without overwhelming them?"
+  ],
+  "seed_definitions": [
+    {
+      "name": "legible behavior policy",
+      "meaning": "A user-understandable description of how an assistant prioritizes instructions, handles uncertainty, and limits risky actions."
+    },
+    {
+      "name": "override handling",
+      "meaning": "The process by which an assistant interprets, accepts, or rejects user attempts to change default behavior."
+    }
+  ]
+}

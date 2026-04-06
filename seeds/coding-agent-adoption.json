@@ -1,0 +1,29 @@
+{
+  "topic": "Cost-visible coding-agent adoption inside teams",
+  "goal": "Explore how usage-based coding agents change pilot design, budgeting, workflow repeatability, and team-level trust in agentic coding.",
+  "include": [
+    "pay-as-you-go agent usage",
+    "token-cost visibility",
+    "pilot-to-scale adoption",
+    "repeatable workflows",
+    "team governance"
+  ],
+  "avoid": [
+    "single-user productivity anecdotes",
+    "pricing analysis without workflow effects"
+  ],
+  "seed_questions": [
+    "Does usage-based pricing encourage useful experimentation or create underuse on uncertain exploratory tasks?",
+    "Which shared coding workflows make team adoption durable rather than dependent on a few power users?"
+  ],
+  "seed_definitions": [
+    {
+      "name": "cost-visible agent workflow",
+      "meaning": "A coding workflow where users can see and react to the resource cost of agent actions while they work."
+    },
+    {
+      "name": "durable adoption",
+      "meaning": "Team usage that remains stable beyond an initial pilot because workflows, incentives, and governance support it."
+    }
+  ]
+}

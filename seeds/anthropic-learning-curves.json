@@ -1,0 +1,29 @@
+{
+  "topic": "Learning curves in real-world AI adoption",
+  "goal": "Examine how users move from shallow prompting to durable, high-value workflows and which product or training choices accelerate that progression.",
+  "include": [
+    "workflow maturity",
+    "prompt skill acquisition",
+    "onboarding design",
+    "repeat usage patterns",
+    "productivity plateaus"
+  ],
+  "avoid": [
+    "benchmark-only learning claims",
+    "vague future-of-work speculation"
+  ],
+  "seed_questions": [
+    "Which user behaviors best predict movement from novice AI use toward repeatable, compounding workflow gains?",
+    "Do guided scaffolds and examples shorten the time required to reach durable AI-assisted productivity?"
+  ],
+  "seed_definitions": [
+    {
+      "name": "AI learning curve",
+      "meaning": "The path by which users accumulate the skill, habits, and workflow understanding needed to extract increasing value from AI systems over time."
+    },
+    {
+      "name": "workflow maturity",
+      "meaning": "The degree to which AI use is integrated into a repeatable process rather than isolated one-off prompts."
+    }
+  ]
+}

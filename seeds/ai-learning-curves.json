@@ -1,0 +1,29 @@
+{
+  "topic": "Learning curves in AI use and skill-biased adoption",
+  "goal": "Explore how tenure with general-purpose AI changes task choice, model selection, collaboration habits, success rates, and inequality of outcomes.",
+  "include": [
+    "learning by doing",
+    "cohort and survivorship effects",
+    "model selection by task value",
+    "success-rate differences",
+    "task complexity over time"
+  ],
+  "avoid": [
+    "deterministic claims of causality",
+    "education panic without evidence"
+  ],
+  "seed_questions": [
+    "How much of expert-looking AI use is learned behavior versus early-adopter selection and survivorship bias?",
+    "Which usage habits actually cause higher success with AI rather than merely correlating with it?"
+  ],
+  "seed_definitions": [
+    {
+      "name": "learning by doing",
+      "meaning": "Improvement in AI-assisted performance that comes from repeated use, experimentation, and adaptation rather than static user traits."
+    },
+    {
+      "name": "tenure effect",
+      "meaning": "A systematic difference in behavior or outcomes associated with how long a user has been working with an AI system."
+    }
+  ]
+}

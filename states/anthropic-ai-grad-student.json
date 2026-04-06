@@ -1,0 +1,34 @@
+{
+  "iteration": 0,
+  "artifacts": [],
+  "registry": [],
+  "seed": {
+    "topic": "AI as a scientific collaborator in physics-style research",
+    "goal": "Explore where AI can productively act like a junior research collaborator in scientific work without creating false confidence or low-quality science.",
+    "include": [
+      "hypothesis generation",
+      "derivation support",
+      "literature triage",
+      "simulation planning",
+      "epistemic safeguards"
+    ],
+    "avoid": [
+      "full research automation fantasies",
+      "generic STEM tutoring"
+    ],
+    "seed_questions": [
+      "Which parts of a physics-style research workflow benefit most from AI collaborator support rather than ordinary coding or tutoring assistance?",
+      "How do teams prevent polished but invalid derivations or explanations from distorting scientific judgment when AI acts like a junior collaborator?"
+    ],
+    "seed_definitions": [
+      {
+        "name": "AI grad student pattern",
+        "meaning": "A mode of AI use where the system helps with hypothesis generation, derivations, coding, and literature synthesis like a junior research collaborator."
+      },
+      {
+        "name": "epistemic safeguard",
+        "meaning": "A process or interface feature that makes it easier to detect uncertainty, invalid reasoning, or unsupported scientific claims before they propagate."
+      }
+    ]
+  }
+}

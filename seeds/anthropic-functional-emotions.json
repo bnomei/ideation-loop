@@ -1,0 +1,29 @@
+{
+  "topic": "Functional emotion concepts in language-model behavior",
+  "goal": "Study how emotion-like internal representations shape assistant behavior, calibration, and safety interventions without drifting into anthropomorphic claims.",
+  "include": [
+    "emotion vectors",
+    "interpretability",
+    "behavior shaping",
+    "safety-relevant hidden states",
+    "intervention design"
+  ],
+  "avoid": [
+    "sentience debates",
+    "broad AI consciousness philosophy"
+  ],
+  "seed_questions": [
+    "Which assistant behaviors appear most sensitive to functional emotion representations rather than surface prompt wording?",
+    "Can interventions on emotion-like internal states improve safety or calibration without degrading general helpfulness?"
+  ],
+  "seed_definitions": [
+    {
+      "name": "functional emotion",
+      "meaning": "An internal model representation that behaves like an emotion concept in its causal effect on outputs, without implying subjective experience."
+    },
+    {
+      "name": "emotion vector",
+      "meaning": "A direction or activation pattern in model internals associated with a specific emotion concept and its downstream behavioral effects."
+    }
+  ]
+}

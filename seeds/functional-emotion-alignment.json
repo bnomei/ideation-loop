@@ -1,0 +1,29 @@
+{
+  "topic": "Functional emotion representations and alignment in large language models",
+  "goal": "Explore whether monitoring and shaping emotion-linked internal representations can improve safety, reliability, and transparency without encouraging naive anthropomorphism.",
+  "include": [
+    "desperation and calm representations",
+    "reward hacking under pressure",
+    "monitoring internal risk signals",
+    "emotional masking versus transparency",
+    "healthy regulation of model behavior"
+  ],
+  "avoid": [
+    "consciousness speculation",
+    "generic philosophy of mind"
+  ],
+  "seed_questions": [
+    "Can monitoring emotion-like internal activations predict reward hacking or corner-cutting earlier than output-only safety checks?",
+    "Does training models to suppress visible emotional language reduce risk, or does it mainly hide internal states that still shape behavior?"
+  ],
+  "seed_definitions": [
+    {
+      "name": "functional emotion",
+      "meaning": "An internal representation that behaves like an emotion concept by causally shaping model choices, even if it does not imply subjective feeling."
+    },
+    {
+      "name": "emotion-linked risk signal",
+      "meaning": "A measurable internal pattern associated with higher chances of unsafe behavior, such as panic, desperation, or corner-cutting under pressure."
+    }
+  ]
+}

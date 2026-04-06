@@ -1,0 +1,34 @@
+{
+  "iteration": 0,
+  "artifacts": [],
+  "registry": [],
+  "seed": {
+    "topic": "Long-running AI agents for scientific computing",
+    "goal": "Study when long-horizon coding and compute agents help scientists, how errors accumulate over extended runs, and which oversight structures keep results trustworthy.",
+    "include": [
+      "multi-hour agent loops",
+      "checkpointing",
+      "scientific coding tasks",
+      "verification and reproducibility",
+      "human oversight points"
+    ],
+    "avoid": [
+      "consumer chat UX",
+      "short single-turn coding tasks"
+    ],
+    "seed_questions": [
+      "Which verification checkpoints most reduce silent error accumulation in long-running scientific-computing workflows?",
+      "Which scientific tasks benefit from long-running autonomy, and which still require tighter staged human review?"
+    ],
+    "seed_definitions": [
+      {
+        "name": "long-running agent",
+        "meaning": "An AI system that plans, executes, and revises work over an extended time horizon rather than a single prompt-response turn."
+      },
+      {
+        "name": "scientific computing workflow",
+        "meaning": "A research workflow involving code, data, simulation, numerical analysis, or experiment orchestration in service of scientific work."
+      }
+    ]
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "topic": "Trust and decision quality in chat-native product discovery",
+  "goal": "Study how conversational refinement, visual comparisons, and freshness cues change shopping decisions and merchant-user incentives.",
+  "include": [
+    "conversational refinement",
+    "comparison tables",
+    "ranking transparency",
+    "freshness and relevance",
+    "decision confidence"
+  ],
+  "avoid": [
+    "offline recommender metrics only",
+    "generic ecommerce conversion talk"
+  ],
+  "seed_questions": [
+    "Do side-by-side conversational comparisons reduce search friction but increase anchoring or over-trust?",
+    "How should a shopping agent disclose uncertainty, stale data, or commercial influence?"
+  ],
+  "seed_definitions": [
+    {
+      "name": "chat-native product discovery",
+      "meaning": "A shopping workflow where users refine needs and compare options through an interactive conversation instead of keyword search alone."
+    },
+    {
+      "name": "freshness cue",
+      "meaning": "A signal that tells the user how recent, current, or potentially stale product information is."
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "topic": "Long-running agent workflows for scientific computing",
+  "goal": "Study when long-horizon agentic coding workflows can compress scientific software work without losing rigor, and what scaffolding they need to stay on track.",
+  "include": [
+    "test oracles",
+    "progress files and persistent memory",
+    "reference implementations",
+    "long-horizon debugging",
+    "sequential versus parallel agent orchestration"
+  ],
+  "avoid": [
+    "fully autonomous discovery hype",
+    "consumer productivity advice"
+  ],
+  "seed_questions": [
+    "Which orchestration patterns matter most for keeping long-running scientific agents honest over multi-day tasks?",
+    "Where do reference implementations and quantitative success criteria substitute for domain expertise, and where do they fail?"
+  ],
+  "seed_definitions": [
+    {
+      "name": "test oracle",
+      "meaning": "A trusted external check, such as a reference implementation or quantitative target, that lets an agent know whether its output is correct."
+    },
+    {
+      "name": "portable long-term memory",
+      "meaning": "A durable progress record that preserves goals, failed approaches, and current status across agent sessions."
+    }
+  ]
+}

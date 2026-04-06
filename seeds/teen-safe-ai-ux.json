@@ -1,0 +1,29 @@
+{
+  "topic": "Age-appropriate AI safeguards that remain usable for teens",
+  "goal": "Explore how safety policies, classifiers, and interface patterns can protect teens without making systems unusable or paternalistic.",
+  "include": [
+    "teen-specific risks",
+    "prompt-based safety policies",
+    "false positives vs underprotection",
+    "graceful refusals",
+    "developer-operationalizable safeguards"
+  ],
+  "avoid": [
+    "adult-only safety assumptions",
+    "one-size-fits-all blocking"
+  ],
+  "seed_questions": [
+    "Which teen-safety policies are easiest for developers to operationalize consistently in real products?",
+    "What refusal and explanation styles protect teens while preserving legitimate exploration and learning?"
+  ],
+  "seed_definitions": [
+    {
+      "name": "age-appropriate safeguard",
+      "meaning": "A safety measure tuned to the risks, autonomy, and developmental needs of younger users rather than generic adult defaults."
+    },
+    {
+      "name": "graceful refusal",
+      "meaning": "A refusal that blocks unsafe assistance while still giving a user a clear explanation or safer alternative."
+    }
+  ]
+}

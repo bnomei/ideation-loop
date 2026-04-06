@@ -1,0 +1,29 @@
+{
+  "topic": "AI-supervised apprenticeship for frontier scientific work",
+  "goal": "Explore the boundary between AI-accelerated research assistance and genuine autonomous scientific judgment in expert-supervised workflows.",
+  "include": [
+    "second-year grad-student analogies",
+    "expert supervision",
+    "verification burden",
+    "scientific taste and judgment",
+    "responsibility for scientific output"
+  ],
+  "avoid": [
+    "end-to-end AI scientist hype",
+    "generic automation optimism"
+  ],
+  "seed_questions": [
+    "Which parts of scientific apprenticeship can be safely delegated to AI, and which still depend on expert taste and verification?",
+    "Does AI mainly compress execution time, or can it also accelerate the development of scientific judgment in the human supervisor?"
+  ],
+  "seed_definitions": [
+    {
+      "name": "G2-style problem",
+      "meaning": "A well-scoped research problem with established methods and checkable endpoints, analogous to work a second-year graduate student might tackle."
+    },
+    {
+      "name": "verification burden",
+      "meaning": "The amount of expert review required to confirm that an AI-generated result is actually correct rather than merely plausible."
+    }
+  ]
+}
