@@ -1,4 +1,4 @@
-"""Minimal research loop with explicit stages and persisted lineage.
+"""Minimal ideation and exploration loop with explicit stages and persisted lineage.
 
 High-level flow:
 1. Summarize the best current artifacts and definitions into a compact context.
@@ -37,6 +37,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 # Config
 # -------------------------
 
+
 @dataclass(frozen=True)
 class LoopConfig:
     """Centralized knobs for prompt sizes, thresholds, and output files."""
@@ -53,6 +54,7 @@ class LoopConfig:
     reference_context_limit: int = 200
     registry_context_limit: int = 50
     context_leader_slots: int = 3
+    context_explore_slots: int = 2
     context_underused_slots: int = 2
     context_frame_breaker_slots: int = 1
     registry_anchor_slots: int = 16
@@ -64,6 +66,13 @@ class LoopConfig:
     claim_lexical_prefilter: float = 0.45
     artifact_dedup_reject_threshold: float = 0.85
     novelty_bonus_weight: float = 0.12
+    novelty_dominant_neighbors: int = 3
+    novelty_corpus_neighbors: int = 5
+    explore_retention_floor: int = 10
+    explore_grounding_weight: float = 0.03
+    exploit_grounding_weight: float = 0.08
+    explore_overclaim_weight: float = 0.18
+    exploit_overclaim_weight: float = 0.28
     registry_match_threshold: float = 0.72
     registry_meaning_conflict_threshold: float = 0.45
     registry_name_weight: float = 0.6
@@ -135,20 +144,26 @@ def configure_runtime_paths(
 # Base model
 # -------------------------
 
+
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
 StructuredSchema = TypeVar("StructuredSchema", bound=StrictModel)
-EvidenceType = Literal["conjecture", "mechanism", "synthesis", "mixed", "evidence-backed"]
+EvidenceType = Literal[
+    "conjecture", "mechanism", "synthesis", "mixed", "evidence-backed"
+]
 EvidenceStrength = Literal["unknown", "low", "mixed", "moderate", "high"]
-QuestionKind = Literal["gap", "refinement", "challenge", "contradiction", "generalization"]
+QuestionKind = Literal[
+    "gap", "refinement", "challenge", "contradiction", "generalization"
+]
 QuestionMode = Literal["exploit", "explore"]
 
 
 # -------------------------
 # DSL
 # -------------------------
+
 
 class Definition(StrictModel):
     name: str
@@ -203,12 +218,16 @@ class Artifact(StrictModel):
     assumptions: List[str] = Field(default_factory=list)
     competing_hypothesis: str = ""
     main_failure_case: str = ""
+    verification_targets: List[str] = Field(default_factory=list)
+    open_questions: List[str] = Field(default_factory=list)
 
     score1: float = 0.0
     score2: float = 0.0
     adversarial: float = 0.0
     dedup: float = 0.0
     novelty: float = 0.0
+    grounding_score: float = 0.0
+    overclaim_penalty: float = 0.0
     reuse: int = 0
     fate: float = 0.0
 
@@ -223,6 +242,7 @@ class State(StrictModel):
 # -------------------------
 # Structured output schemas
 # -------------------------
+
 
 class QBatch(StrictModel):
     questions: List["PlannedQuestion"]
@@ -246,6 +266,8 @@ class Draft(StrictModel):
     assumptions: List[str] = Field(default_factory=list)
     competing_hypothesis: str = ""
     main_failure_case: str = ""
+    verification_targets: List[str] = Field(default_factory=list)
+    open_questions: List[str] = Field(default_factory=list)
 
 
 class Score(StrictModel):
@@ -254,6 +276,12 @@ class Score(StrictModel):
 
 class Adv(StrictModel):
     penalty: float = Field(ge=0.0, le=1.0)
+
+
+class GroundingReview(StrictModel):
+    grounding_score: float = Field(ge=0.0, le=1.0)
+    overclaim_penalty: float = Field(ge=0.0, le=1.0)
+    unsupported_claims: List[str] = Field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -265,7 +293,10 @@ class DraftEvaluation:
     adversarial: float
     dedup: float
     novelty: float
+    grounding_score: float
+    overclaim_penalty: float
     reuse: int
+    question_mode: QuestionMode = "exploit"
 
     @property
     def fate(self) -> float:
@@ -275,6 +306,9 @@ class DraftEvaluation:
             self.adversarial,
             self.dedup,
             self.novelty,
+            self.grounding_score,
+            self.overclaim_penalty,
+            self.question_mode,
             self.reuse,
         )
 
@@ -284,9 +318,38 @@ class DraftEvaluation:
 # -------------------------
 
 STOPWORDS = {
-    "the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "with",
-    "is", "are", "be", "by", "that", "this", "it", "as", "at", "from", "if",
-    "then", "than", "into", "out", "up", "down", "how", "what", "why", "when"
+    "the",
+    "a",
+    "an",
+    "and",
+    "or",
+    "of",
+    "to",
+    "in",
+    "on",
+    "for",
+    "with",
+    "is",
+    "are",
+    "be",
+    "by",
+    "that",
+    "this",
+    "it",
+    "as",
+    "at",
+    "from",
+    "if",
+    "then",
+    "than",
+    "into",
+    "out",
+    "up",
+    "down",
+    "how",
+    "what",
+    "why",
+    "when",
 }
 
 
@@ -337,7 +400,9 @@ def embed_texts(texts: List[str]) -> List[List[float]]:
     return [_embedding_cache[t] for t in texts]
 
 
-def max_embedding_similarity(text: str, others: List[str], lexical_prefilter: float) -> float:
+def max_embedding_similarity(
+    text: str, others: List[str], lexical_prefilter: float
+) -> float:
     if not others:
         return 0.0
 
@@ -350,9 +415,29 @@ def max_embedding_similarity(text: str, others: List[str], lexical_prefilter: fl
     return max(cosine_similarity(base, v) for v in vectors[1:])
 
 
+def top_k_embedding_similarity(
+    text: str,
+    others: List[str],
+    k: int = 3,
+) -> float:
+    """Average the top-k semantic similarities without lexical prefiltering."""
+    if not others:
+        return 0.0
+
+    vectors = embed_texts([text] + others)
+    base = vectors[0]
+    similarities = sorted(
+        (cosine_similarity(base, vector) for vector in vectors[1:]),
+        reverse=True,
+    )
+    top = similarities[: max(1, min(k, len(similarities)))]
+    return sum(top) / len(top)
+
+
 # -------------------------
 # Persistence
 # -------------------------
+
 
 def load_state() -> State:
     if not STATE_FILE.exists():
@@ -370,7 +455,12 @@ def save_state(state: State, git: bool = False) -> None:
         try:
             subprocess.run(["git", "add", str(STATE_FILE)], check=True)
             subprocess.run(
-                ["git", "commit", "-m", f"update {datetime.now(timezone.utc).isoformat()}"],
+                [
+                    "git",
+                    "commit",
+                    "-m",
+                    f"update {datetime.now(timezone.utc).isoformat()}",
+                ],
                 check=True,
             )
         except Exception:
@@ -381,7 +471,10 @@ def save_state(state: State, git: bool = False) -> None:
 # OpenAI structured call
 # -------------------------
 
-def llm(prompt: str, schema: type[StructuredSchema], tokens: int = 1000) -> StructuredSchema:
+
+def llm(
+    prompt: str, schema: type[StructuredSchema], tokens: int = 1000
+) -> StructuredSchema:
     """Call the Responses API with structured parsing and one concise retry."""
     current_prompt = prompt
     current_tokens = tokens
@@ -414,6 +507,7 @@ def llm(prompt: str, schema: type[StructuredSchema], tokens: int = 1000) -> Stru
 # -------------------------
 # Context
 # -------------------------
+
 
 def top_artifacts(state: State, n: int = TOP_CONTEXT) -> List[Artifact]:
     """Return the current highest-fate artifacts that shape future generations."""
@@ -459,7 +553,9 @@ def select_context_artifacts(
     selected_ids: set[str] = set()
     artifacts = list(state.artifacts)
 
-    leaders = sorted(artifacts, key=lambda artifact: (artifact.fate, artifact.reuse), reverse=True)
+    leaders = sorted(
+        artifacts, key=lambda artifact: (artifact.fate, artifact.reuse), reverse=True
+    )
     take_unique_artifacts(
         selected,
         selected_ids,
@@ -467,6 +563,21 @@ def select_context_artifacts(
         min(CONFIG.context_leader_slots, n),
         "leader",
     )
+
+    remaining_slots = max(n - len(selected), 0)
+    if remaining_slots:
+        explores = sorted(
+            [artifact for artifact in artifacts if artifact.question.mode == "explore"],
+            key=lambda artifact: (artifact.fate, artifact.novelty, artifact.reuse),
+            reverse=True,
+        )
+        take_unique_artifacts(
+            selected,
+            selected_ids,
+            explores,
+            min(CONFIG.context_explore_slots, remaining_slots),
+            "explore",
+        )
 
     remaining_slots = max(n - len(selected), 0)
     if remaining_slots:
@@ -492,11 +603,14 @@ def select_context_artifacts(
         frame_breakers = [
             artifact
             for artifact in artifacts
-            if artifact.question.kind in {"challenge", "contradiction", "generalization"}
+            if artifact.question.kind
+            in {"challenge", "contradiction", "generalization"}
         ]
         frame_breakers = sorted(
             frame_breakers,
-            key=lambda artifact: stable_iteration_rank("frame-breaker", state, artifact.id),
+            key=lambda artifact: stable_iteration_rank(
+                "frame-breaker", state, artifact.id
+            ),
         )
         take_unique_artifacts(
             selected,
@@ -510,9 +624,13 @@ def select_context_artifacts(
     if remaining_slots:
         sampled = sorted(
             artifacts,
-            key=lambda artifact: stable_iteration_rank("artifact-sample", state, artifact.id),
+            key=lambda artifact: stable_iteration_rank(
+                "artifact-sample", state, artifact.id
+            ),
         )
-        take_unique_artifacts(selected, selected_ids, sampled, remaining_slots, "sampled")
+        take_unique_artifacts(
+            selected, selected_ids, sampled, remaining_slots, "sampled"
+        )
 
     return selected[:n]
 
@@ -617,7 +735,9 @@ def select_registry_entries(
     if remaining_slots:
         sampled = sorted(
             state.registry,
-            key=lambda registry: stable_iteration_rank("registry-sample", state, registry.id),
+            key=lambda registry: stable_iteration_rank(
+                "registry-sample", state, registry.id
+            ),
         )
         take_unique_registry_entries(
             selected,
@@ -639,7 +759,9 @@ def topic_seed_payload(seed: TopicSeed) -> dict[str, object]:
         "include": seed.include[:10],
         "avoid": seed.avoid[:10],
         "seed_questions": seed.seed_questions[:5],
-        "seed_definitions": [definition.model_dump() for definition in seed.seed_definitions[:10]],
+        "seed_definitions": [
+            definition.model_dump() for definition in seed.seed_definitions[:10]
+        ],
     }
 
 
@@ -677,7 +799,11 @@ def context_blob(state: State) -> str:
                 "evidence_strength": a.evidence_strength,
                 "competing_hypothesis": a.competing_hypothesis[:240],
                 "main_failure_case": a.main_failure_case[:240],
+                "verification_targets": a.verification_targets[:3],
+                "open_questions": a.open_questions[:3],
                 "novelty": a.novelty,
+                "grounding_score": a.grounding_score,
+                "overclaim_penalty": a.overclaim_penalty,
                 "fate": a.fate,
                 "reuse": a.reuse,
             }
@@ -718,7 +844,7 @@ def question_batch_plan() -> str:
 def build_question_prompt(state: State) -> str:
     """Keep the question-generation prompt in one place for easier prompt edits."""
     return f"""
-Generate {QUESTION_BATCH_SIZE} new useful research questions.
+Generate {QUESTION_BATCH_SIZE} new useful ideation questions.
 
 Rules:
 - avoid duplicates
@@ -742,14 +868,33 @@ def build_artifact_prompt(state: State, question: Question) -> str:
     """Build the structured drafting prompt from the reusable lineage surface."""
     source_artifacts = [
         artifact
-        for artifact, _ in select_context_artifacts(state, CONFIG.lineage_context_artifacts)
+        for artifact, _ in select_context_artifacts(
+            state, CONFIG.lineage_context_artifacts
+        )
     ]
     known_ids = [artifact.id for artifact in source_artifacts]
     known_claim_ids = [
-        claim.id
-        for artifact in source_artifacts
-        for claim in artifact.claims
-    ][:CONFIG.reference_context_limit]
+        claim.id for artifact in source_artifacts for claim in artifact.claims
+    ][: CONFIG.reference_context_limit]
+    mode_rules = (
+        """
+Mode rules for explore questions:
+- prefer hypotheses, frameworks, counterfactuals, or design directions that open up the space
+- novelty is welcome when it is explicit about uncertainty and limits
+- do not fake confidence just to make the idea sound stronger
+- verification_targets should name the smallest concrete checks a human could run next
+- open_questions should capture the most useful unresolved issues
+"""
+        if question.mode == "explore"
+        else """
+Mode rules for exploit questions:
+- prefer the strongest grounded synthesis available from the current context
+- sharpen or stress-test the main line of inquiry without pretending certainty
+- novelty is welcome only when it materially improves the explanation or exposes a weak point
+- verification_targets should focus on checking assumptions, edge cases, or likely weak links
+- open_questions should capture the most decision-relevant unknowns that remain
+"""
+    )
 
     return f"""
 Answer the question with structured output.
@@ -766,7 +911,11 @@ Rules:
 - list the main assumptions that would have to hold
 - include one serious competing hypothesis or alternative explanation
 - include one main failure case or boundary condition
+- include 1-3 verification targets that would most reduce uncertainty for a human reviewer
+- include 0-3 open questions that would matter for the next round of ideation
 - do not present speculation as established evidence
+
+{mode_rules}
 
 {topic_seed_prompt(state)}
 
@@ -805,9 +954,49 @@ Artifact:
 """
 
 
+def build_grounding_prompt(draft: Draft) -> str:
+    """Prompt for the ideation-friendly grounding and overclaim pass."""
+    mode_guidance = (
+        """
+This is an explore artifact in an ideation loop.
+- allow plausible speculation and new framings
+- reward epistemic honesty
+- penalize only claims that sound more established than the artifact's own evidence labels justify
+- low grounding is acceptable if uncertainty is explicit and verification targets are good
+"""
+        if draft.question.mode == "explore"
+        else """
+This is an exploit artifact in an ideation loop.
+- prefer grounded synthesis over rhetorical confidence
+- penalize unsupported certainty, invented precision, and claims that outrun the stated evidence
+- reward artifacts that stay useful while clearly marking uncertainty
+"""
+    )
+
+    return f"""
+Judge this artifact for ideation-safe grounding.
+
+Return:
+- grounding_score: how appropriately grounded and reality-sensitive the artifact is for its own claims
+- overclaim_penalty: how much it overstates confidence, precision, or factual support
+- unsupported_claims: up to 3 short examples of claims that sound too strong for the stated evidence
+
+Important:
+- this is not a truth-verification task
+- do not punish an artifact just for being speculative or exploratory
+- do punish bluffing, invented certainty, fake quantification, or presenting conjecture as settled fact
+
+{mode_guidance}
+
+Artifact:
+{draft.model_dump_json()}
+"""
+
+
 # -------------------------
 # Generation
 # -------------------------
+
 
 def normalize_question_modes(questions: List[Question]) -> List[Question]:
     """Enforce the exploit/explore quota even when the model is sloppy about labels."""
@@ -815,7 +1004,9 @@ def normalize_question_modes(questions: List[Question]) -> List[Question]:
         return questions
 
     explore_target = min(CONFIG.explore_questions_per_iteration, len(questions))
-    explore_indexes = [idx for idx, question in enumerate(questions) if question.mode == "explore"]
+    explore_indexes = [
+        idx for idx, question in enumerate(questions) if question.mode == "explore"
+    ]
 
     normalized = list(questions)
     if len(explore_indexes) < explore_target:
@@ -830,7 +1021,9 @@ def normalize_question_modes(questions: List[Question]) -> List[Question]:
             for idx in range(len(normalized))
             if idx not in explore_indexes and idx not in preferred_indexes
         ]
-        promote_indexes = (preferred_indexes + fallback_indexes)[: explore_target - len(explore_indexes)]
+        promote_indexes = (preferred_indexes + fallback_indexes)[
+            : explore_target - len(explore_indexes)
+        ]
         for idx in promote_indexes:
             normalized[idx] = normalized[idx].model_copy(update={"mode": "explore"})
 
@@ -843,14 +1036,16 @@ def normalize_question_modes(questions: List[Question]) -> List[Question]:
 
 def gen_questions(state: State) -> List[Question]:
     result = llm(build_question_prompt(state), QBatch, tokens=1000)
-    return normalize_question_modes([
-        Question(
-            text=planned.text,
-            kind=planned.kind,
-            mode=planned.mode,
-        )
-        for planned in result.questions
-    ])
+    return normalize_question_modes(
+        [
+            Question(
+                text=planned.text,
+                kind=planned.kind,
+                mode=planned.mode,
+            )
+            for planned in result.questions
+        ]
+    )
 
 
 def gen_artifact(state: State, q: Question) -> Draft:
@@ -861,9 +1056,14 @@ def gen_artifact(state: State, q: Question) -> Draft:
 # Evaluation
 # -------------------------
 
+
 def judge1(d: Draft) -> float:
     return llm(
-        build_score_prompt(d, "Score 0..1 for usefulness, clarity, and internal coherence."),
+        build_score_prompt(
+            d,
+            "Score 0..1 for ideation usefulness, clarity, and internal coherence. "
+            "Reward artifacts that would help a human think, design, or explore better, even when they are speculative.",
+        ),
         Score,
         tokens=120,
     ).score
@@ -871,7 +1071,11 @@ def judge1(d: Draft) -> float:
 
 def judge2(d: Draft) -> float:
     return llm(
-        build_score_prompt(d, "Score 0..1 for generality, transferability, and future reuse."),
+        build_score_prompt(
+            d,
+            "Score 0..1 for generative value, transferability, and future reuse in ideation. "
+            "Reward artifacts that open productive next steps, alternative framings, or better follow-up questions.",
+        ),
         Score,
         tokens=120,
     ).score
@@ -881,26 +1085,64 @@ def adversary(d: Draft) -> float:
     return llm(build_adversary_prompt(d), Adv, tokens=120).penalty
 
 
+def grounding_review(draft: Draft) -> GroundingReview:
+    return llm(build_grounding_prompt(draft), GroundingReview, tokens=220)
+
+
+def novelty_anchor_texts(state: State) -> List[str]:
+    """Seed and topic anchors that define the current exploration boundary."""
+    anchors: List[str] = []
+
+    if state.seed is not None:
+        anchors.append(state.seed.topic)
+        if state.seed.goal:
+            anchors.append(state.seed.goal)
+        anchors.extend(state.seed.seed_questions[:5])
+        anchors.extend(
+            f"{definition.name}: {definition.meaning}"
+            for definition in state.seed.seed_definitions[:5]
+        )
+
+    return [anchor for anchor in anchors if anchor]
+
+
 def novelty_score(draft: Draft, state: State) -> float:
-    """Reward questions that move beyond the current dominant frame without going off-topic."""
+    """Reward on-topic conceptual distance instead of lexical novelty."""
     dominant_questions = [
         artifact.question.text
         for artifact in top_artifacts(state, CONFIG.lineage_context_artifacts)
     ]
-    if not dominant_questions:
+    corpus_questions = existing_question_texts(state)
+    if not corpus_questions:
         return 0.5
 
-    dominant_similarity = max_embedding_similarity(
+    dominant_similarity = top_k_embedding_similarity(
         draft.question.text,
         dominant_questions,
-        QUESTION_LEXICAL_PREFILTER,
+        k=CONFIG.novelty_dominant_neighbors,
     )
-    return max(0.0, 1.0 - dominant_similarity)
+    corpus_similarity = top_k_embedding_similarity(
+        draft.question.text,
+        corpus_questions,
+        k=CONFIG.novelty_corpus_neighbors,
+    )
+    anchor_pool = dominant_questions + novelty_anchor_texts(state)
+    topic_affinity = (
+        top_k_embedding_similarity(draft.question.text, anchor_pool, k=1)
+        if anchor_pool
+        else corpus_similarity
+    )
+
+    distance_from_dominant = max(0.0, 1.0 - dominant_similarity)
+    continuity = max(topic_affinity, corpus_similarity)
+    novelty = distance_from_dominant * (continuity**1.5)
+    return max(0.0, min(1.0, novelty))
 
 
 # -------------------------
 # Registry
 # -------------------------
+
 
 def find_registry_match(state: State, d: Definition) -> Optional[RegistryDefinition]:
     best = None
@@ -909,7 +1151,10 @@ def find_registry_match(state: State, d: Definition) -> Optional[RegistryDefinit
     for reg in state.registry:
         name_score = max(
             lexical_similarity(d.name, reg.name),
-            max((lexical_similarity(d.name, alias) for alias in reg.aliases), default=0.0),
+            max(
+                (lexical_similarity(d.name, alias) for alias in reg.aliases),
+                default=0.0,
+            ),
         )
         meaning_score = lexical_similarity(d.meaning, reg.meaning)
         score = (
@@ -958,6 +1203,7 @@ def register_defs(state: State, artifact: Artifact) -> None:
 # Dedup
 # -------------------------
 
+
 def existing_question_texts(state: State) -> List[str]:
     return [a.question.text for a in state.artifacts]
 
@@ -978,8 +1224,12 @@ def dedup_claims(state: State, claims: List[Claim]) -> tuple[List[Claim], float]
 
     for claim in claims:
         local_others = [c.text for c in kept]
-        sim_existing = max_embedding_similarity(claim.text, existing, CLAIM_LEXICAL_PREFILTER)
-        sim_local = max_embedding_similarity(claim.text, local_others, CLAIM_LEXICAL_PREFILTER)
+        sim_existing = max_embedding_similarity(
+            claim.text, existing, CLAIM_LEXICAL_PREFILTER
+        )
+        sim_local = max_embedding_similarity(
+            claim.text, local_others, CLAIM_LEXICAL_PREFILTER
+        )
         sim = max(sim_existing, sim_local)
         max_penalty = max(max_penalty, sim)
 
@@ -1005,6 +1255,7 @@ def should_reject_draft(dedup: float) -> bool:
 # -------------------------
 # Lineage and reuse
 # -------------------------
+
 
 def artifact_index(state: State) -> dict[str, Artifact]:
     return {a.id: a for a in state.artifacts}
@@ -1052,20 +1303,37 @@ def apply_reuse_tracking(state: State, artifact: Artifact) -> None:
 # Fate
 # -------------------------
 
+
 def compute_fate(
     s1: float,
     s2: float,
     adv: float,
     dedup: float,
     novelty: float,
+    grounding_score: float,
+    overclaim_penalty: float,
+    question_mode: QuestionMode,
     reuse: int,
 ) -> float:
+    grounding_weight = (
+        CONFIG.exploit_grounding_weight
+        if question_mode == "exploit"
+        else CONFIG.explore_grounding_weight
+    )
+    overclaim_weight = (
+        CONFIG.exploit_overclaim_weight
+        if question_mode == "exploit"
+        else CONFIG.explore_overclaim_weight
+    )
+
     return max(
         ((s1 + s2) / 2.0)
         - abs(s1 - s2) * 0.4
         - adv * 0.7
         - dedup * 0.4
         + novelty * CONFIG.novelty_bonus_weight
+        + grounding_score * grounding_weight
+        - overclaim_penalty * overclaim_weight
         + min(reuse * 0.05, 0.25),
         0.0,
     )
@@ -1074,6 +1342,7 @@ def compute_fate(
 # -------------------------
 # Visualization
 # -------------------------
+
 
 def build_graph(state: State) -> nx.DiGraph:
     g = nx.DiGraph()
@@ -1119,8 +1388,7 @@ def draw_graph(state: State, path: Optional[Path] = None) -> None:
 
     node_sizes = [500 + (g.nodes[n].get("fate", 0.0) * 2500) for n in g.nodes]
     edge_colors = [
-        "black" if g.edges[e].get("kind") == "parent" else "gray"
-        for e in g.edges
+        "black" if g.edges[e].get("kind") == "parent" else "gray" for e in g.edges
     ]
     labels = {n: g.nodes[n]["label"] for n in g.nodes}
 
@@ -1140,10 +1408,10 @@ def draw_graph(state: State, path: Optional[Path] = None) -> None:
 # Hazard / prune
 # -------------------------
 
+
 def should_run_hazard(iteration: int) -> bool:
     return (
-        iteration % CONFIG.hazard_every_iterations
-        == CONFIG.hazard_every_iterations - 1
+        iteration % CONFIG.hazard_every_iterations == CONFIG.hazard_every_iterations - 1
     )
 
 
@@ -1152,18 +1420,37 @@ def hazard(state: State) -> None:
     if len(state.artifacts) < CONFIG.hazard_min_artifacts:
         return
     ranked = sorted(state.artifacts, key=lambda a: a.fate, reverse=True)
-    state.artifacts = ranked[CONFIG.hazard_drop_leaders:]
+    state.artifacts = ranked[CONFIG.hazard_drop_leaders :]
 
 
 def prune(state: State) -> None:
-    """Keep only the current top-scoring artifact population."""
-    state.artifacts.sort(key=lambda a: a.fate, reverse=True)
-    state.artifacts = state.artifacts[:MAX_POP]
+    """Keep the top population while reserving room for explore artifacts."""
+    if len(state.artifacts) <= MAX_POP:
+        state.artifacts.sort(key=lambda a: a.fate, reverse=True)
+        return
+
+    ranked = sorted(state.artifacts, key=lambda artifact: artifact.fate, reverse=True)
+    explores = [artifact for artifact in ranked if artifact.question.mode == "explore"]
+    explore_keep = min(CONFIG.explore_retention_floor, len(explores), MAX_POP)
+
+    kept: List[Artifact] = explores[:explore_keep]
+    kept_ids = {artifact.id for artifact in kept}
+
+    for artifact in ranked:
+        if artifact.id in kept_ids:
+            continue
+        kept.append(artifact)
+        if len(kept) >= MAX_POP:
+            break
+
+    kept.sort(key=lambda artifact: artifact.fate, reverse=True)
+    state.artifacts = kept
 
 
 # -------------------------
 # Seed + CLI
 # -------------------------
+
 
 def load_seed_file(path: Path) -> TopicSeed:
     return TopicSeed.model_validate_json(path.expanduser().read_text(encoding="utf-8"))
@@ -1234,7 +1521,9 @@ def apply_seed(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Minimal OpenAI-backed research loop runner.")
+    parser = argparse.ArgumentParser(
+        description="Minimal OpenAI-backed ideation and exploration loop runner."
+    )
     parser.add_argument(
         "--iters",
         type=int,
@@ -1297,6 +1586,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Allow replacing or adding a seed on an already populated state file.",
     )
+    parser.add_argument(
+        "--rejudge-existing",
+        action="store_true",
+        help="Re-score existing artifacts in the selected state with the current judges before running iterations.",
+    )
 
     args = parser.parse_args()
     used_inline_seed_fields = any(
@@ -1308,9 +1602,13 @@ def parse_args() -> argparse.Namespace:
         ]
     )
     if used_inline_seed_fields and args.seed_topic is None and args.seed_file is None:
-        parser.error("--seed-topic is required when using inline seed flags without --seed-file.")
+        parser.error(
+            "--seed-topic is required when using inline seed flags without --seed-file."
+        )
     if args.replace_seed and args.seed_file is None and args.seed_topic is None:
-        parser.error("--replace-seed requires --seed-file or inline --seed-topic input.")
+        parser.error(
+            "--replace-seed requires --seed-file or inline --seed-topic input."
+        )
     return args
 
 
@@ -1318,15 +1616,20 @@ def parse_args() -> argparse.Namespace:
 # Main loop
 # -------------------------
 
+
 def evaluate_draft(draft: Draft, state: State, dedup: float) -> DraftEvaluation:
     """Run the evaluation passes that determine whether a draft survives."""
+    grounding = grounding_review(draft)
     return DraftEvaluation(
         score1=judge1(draft),
         score2=judge2(draft),
         adversarial=adversary(draft),
         dedup=dedup,
         novelty=novelty_score(draft, state),
+        grounding_score=grounding.grounding_score,
+        overclaim_penalty=grounding.overclaim_penalty,
         reuse=compute_reuse(draft, state),
+        question_mode=draft.question.mode,
     )
 
 
@@ -1344,18 +1647,97 @@ def materialize_artifact(draft: Draft, evaluation: DraftEvaluation) -> Artifact:
         assumptions=draft.assumptions,
         competing_hypothesis=draft.competing_hypothesis,
         main_failure_case=draft.main_failure_case,
+        verification_targets=draft.verification_targets,
+        open_questions=draft.open_questions,
         score1=evaluation.score1,
         score2=evaluation.score2,
         adversarial=evaluation.adversarial,
         dedup=evaluation.dedup,
         novelty=evaluation.novelty,
+        grounding_score=evaluation.grounding_score,
+        overclaim_penalty=evaluation.overclaim_penalty,
         reuse=evaluation.reuse,
     )
     artifact.fate = evaluation.fate
     return artifact
 
 
-def process_question(state: State, question: Question) -> tuple[Optional[Artifact], float]:
+def artifact_to_draft(artifact: Artifact) -> Draft:
+    """Project a persisted artifact back into the draft schema for re-evaluation."""
+    return Draft(
+        question=artifact.question,
+        answer=artifact.answer,
+        definitions=artifact.definitions,
+        claims=artifact.claims,
+        parents=artifact.parents,
+        references=artifact.references,
+        evidence_type=artifact.evidence_type,
+        evidence_strength=artifact.evidence_strength,
+        assumptions=artifact.assumptions,
+        competing_hypothesis=artifact.competing_hypothesis,
+        main_failure_case=artifact.main_failure_case,
+        verification_targets=artifact.verification_targets,
+        open_questions=artifact.open_questions,
+    )
+
+
+def dedup_penalty_for_draft(state: State, draft: Draft) -> float:
+    """Score how redundant a draft is against the current artifact population."""
+    question_penalty = dedup_question_penalty(state, draft.question)
+    _, claim_penalty = dedup_claims(state, draft.claims)
+    return max(question_penalty, claim_penalty)
+
+
+def rejudge_existing_artifacts(state: State) -> bool:
+    """Re-score persisted artifacts with the current judges without regenerating content."""
+    if not state.artifacts:
+        print("\nno existing artifacts to rejudge")
+        return False
+
+    print(f"\n--- rejudging {len(state.artifacts)} existing artifacts ---")
+    original_artifacts = list(state.artifacts)
+    refreshed: List[Artifact] = []
+
+    for artifact in original_artifacts:
+        peer_state = state.model_copy(
+            update={
+                "artifacts": [
+                    candidate
+                    for candidate in original_artifacts
+                    if candidate.id != artifact.id
+                ]
+            }
+        )
+        draft = artifact_to_draft(artifact)
+        evaluation = evaluate_draft(
+            draft,
+            peer_state,
+            dedup_penalty_for_draft(peer_state, draft),
+        )
+        updated = artifact.model_copy(
+            update={
+                "score1": evaluation.score1,
+                "score2": evaluation.score2,
+                "adversarial": evaluation.adversarial,
+                "dedup": evaluation.dedup,
+                "novelty": evaluation.novelty,
+                "grounding_score": evaluation.grounding_score,
+                "overclaim_penalty": evaluation.overclaim_penalty,
+                "reuse": evaluation.reuse,
+                "fate": evaluation.fate,
+            }
+        )
+        refreshed.append(updated)
+        print(f"rejudged: {format_artifact_progress(updated)}")
+
+    state.artifacts = refreshed
+    prune(state)
+    return True
+
+
+def process_question(
+    state: State, question: Question
+) -> tuple[Optional[Artifact], float]:
     """Execute the full per-question pipeline and append the surviving artifact."""
     draft = gen_artifact(state, question)
     draft, dedup = sanitize_draft(state, draft)
@@ -1374,7 +1756,9 @@ def format_artifact_progress(artifact: Artifact) -> str:
     """Stable progress line for per-question logging."""
     return (
         f"{artifact.question.text} -> "
-        f"fate={artifact.fate:.3f} dedup={artifact.dedup:.3f} novelty={artifact.novelty:.3f}"
+        f"fate={artifact.fate:.3f} dedup={artifact.dedup:.3f} "
+        f"novelty={artifact.novelty:.3f} grounding={artifact.grounding_score:.3f} "
+        f"overclaim={artifact.overclaim_penalty:.3f}"
     )
 
 
@@ -1398,7 +1782,7 @@ def persist_iteration(state: State, git: bool, render_graph: bool) -> None:
 
 
 def run_iteration(state: State, git: bool = False, render_graph: bool = True) -> None:
-    """Run one full research iteration over a generated batch of questions."""
+    """Run one full ideation iteration over a generated batch of questions."""
     print(f"\n--- iteration {state.iteration} ---")
 
     questions = gen_questions(state)
@@ -1428,8 +1812,9 @@ def run(
     render_graph: bool = True,
     seed: Optional[TopicSeed] = None,
     replace_seed: bool = False,
+    rejudge_existing: bool = False,
 ) -> None:
-    """Run several iterations of the research loop against the persisted state."""
+    """Run several iterations of the ideation loop against the persisted state."""
     if iters < 0:
         raise ValueError("--iters must be zero or greater.")
 
@@ -1440,7 +1825,11 @@ def run(
     )
     persisted = False
 
-    if seed_changed and iters == 0:
+    if rejudge_existing and rejudge_existing_artifacts(state):
+        persist_iteration(state, git=git, render_graph=render_graph)
+        persisted = True
+
+    if seed_changed and iters == 0 and not persisted:
         persist_iteration(state, git=git, render_graph=render_graph)
         persisted = True
 
@@ -1466,6 +1855,7 @@ if __name__ == "__main__":
             render_graph=not cli_args.no_graph,
             seed=resolve_seed(cli_args),
             replace_seed=cli_args.replace_seed,
+            rejudge_existing=cli_args.rejudge_existing,
         )
     except ValueError as exc:
         raise SystemExit(f"error: {exc}") from exc
