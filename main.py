@@ -20,6 +20,7 @@ import json
 import math
 import os
 import re
+import tempfile
 import uuid
 import hashlib
 import subprocess
@@ -458,26 +459,52 @@ def load_state() -> State:
     return State.model_validate_json(STATE_FILE.read_text(encoding="utf-8"))
 
 
+def run_git_command(args: List[str]) -> None:
+    """Run a git command and surface stderr when it fails."""
+    try:
+        subprocess.run(
+            ["git", *args],
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        stderr = (exc.stderr or "").strip()
+        stdout = (exc.stdout or "").strip()
+        details = stderr or stdout or "unknown git error"
+        raise RuntimeError(f"git {' '.join(args)} failed: {details}") from exc
+
+
 def save_state(state: State, git: bool = False) -> None:
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    STATE_FILE.write_text(
-        state.model_dump_json(indent=2, exclude_none=True),
-        encoding="utf-8",
-    )
+    serialized = state.model_dump_json(indent=2, exclude_none=True)
+    temp_path: Optional[Path] = None
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=STATE_FILE.parent,
+            prefix=f".{STATE_FILE.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            handle.write(serialized)
+            temp_path = Path(handle.name)
+        temp_path.replace(STATE_FILE)
+    finally:
+        if temp_path is not None and temp_path.exists():
+            temp_path.unlink()
+
     if git:
-        try:
-            subprocess.run(["git", "add", str(STATE_FILE)], check=True)
-            subprocess.run(
-                [
-                    "git",
-                    "commit",
-                    "-m",
-                    f"update {datetime.now(timezone.utc).isoformat()}",
-                ],
-                check=True,
-            )
-        except Exception:
-            pass
+        run_git_command(["add", str(STATE_FILE)])
+        run_git_command(
+            [
+                "commit",
+                "-m",
+                f"update {datetime.now(timezone.utc).isoformat()}",
+            ]
+        )
 
 
 # -------------------------
