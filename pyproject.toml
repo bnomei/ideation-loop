@@ -15,10 +15,10 @@ classifiers = [
     "Programming Language :: Python :: 3.9",
 ]
 dependencies = [
-    "matplotlib>=3.7.0",
-    "networkx>=3.0",
-    "openai>=1.0.0",
-    "pydantic>=2.0.0",
+    "matplotlib>=3.9,<4",
+    "networkx>=3.2,<4",
+    "openai>=2.30,<3",
+    "pydantic>=2.12,<3",
 ]
 
 [project.urls]

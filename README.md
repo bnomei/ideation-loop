@@ -98,6 +98,9 @@ cp .env.example .env
 uv run --env-file .env python -u main.py
 ```
 
+`uv sync --frozen` is the supported install path for this repository. The
+checked-in `uv.lock` is part of the release contract for local runs and CI.
+
 That command will:
 
 - load or create `world_state.json`
