@@ -1,7 +1,7 @@
 [project]
-name = "knowledge-loop"
+name = "ideation-loop"
 version = "0.1.0"
-description = "Minimal OpenAI-backed research loop runner"
+description = "Minimal OpenAI-backed ideation and exploration loop runner"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [

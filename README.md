@@ -1,12 +1,13 @@
-# knowledge-loop
+# ideation-loop
 
-`knowledge-loop` is a local research loop runner built on the OpenAI API.
-It keeps a persistent "world state" in JSON, asks the model for follow-up
-questions, drafts answers, scores them, deduplicates similar content, and
-renders a lineage graph of the surviving artifacts.
+`ideation-loop` is a local ideation-first exploration loop runner built on
+the OpenAI API. It keeps a persistent "world state" in JSON, asks the model
+for follow-up questions, drafts structured answers, scores them for usefulness,
+grounding, reuse, and overclaiming, deduplicates similar content, and renders
+a lineage graph of the surviving artifacts.
 
-This repository is for running focused exploratory Q&A loops over time. A
-single state file represents one exploration.
+This repository is for running focused ideation and exploration loops over
+time. A single state file represents one exploration.
 
 ## What The Script Does
 
@@ -14,12 +15,17 @@ Each iteration of [`main.py`](main.py):
 
 1. Loads a persisted state file, or creates a new empty one.
 2. Summarizes the strongest existing artifacts and registry concepts.
-3. Asks the model for a small batch of follow-up research questions.
+3. Asks the model for a small batch of follow-up ideation questions, split
+   between `exploit` and `explore`.
 4. Drafts one structured answer per question.
 5. Scores the draft for usefulness and reuse, applies an adversarial penalty,
    and deduplicates similar questions and claims.
 6. Persists the surviving artifacts back into the state file.
 7. Optionally renders a lineage graph as a PNG.
+
+The loop is optimized for disciplined ideation, not truth-verification. It is
+best used to generate better frames, mechanisms, scenario ideas, and
+next-check questions rather than to build a definitive research archive.
 
 By default:
 
@@ -42,12 +48,15 @@ It contains:
 Newer runs may also persist extra epistemic fields on artifacts, such as
 evidence type, evidence strength, assumptions, a competing hypothesis, and a
 main failure case. Older state files without these fields still load normally.
+Older state files can also be rejudged with the current scoring logic by using
+`--rejudge-existing`.
 
 Important behavior:
 
 - a world state is a working set, not a permanent archive of everything ever generated
 - the loop prunes artifacts over time, so low-value or displaced artifacts may disappear
 - if a state has a stored `seed`, future runs of that same state continue using it
+- the loop is ideation-first: `explore` questions open new frames, while `exploit` questions deepen or stress-test the strongest current line
 
 ## Requirements
 
@@ -101,6 +110,34 @@ uv run --env-file .env python -u main.py \
 
 That continues the existing exploration, keeps its stored seed if it has one,
 and writes back to the same file.
+
+### Rejudge An Older State With The Current Scoring Logic
+
+Use this when you want an older state to benefit from the current judges and
+fate scoring before you continue it.
+
+Rescore only:
+
+```bash
+uv run --env-file .env python -u main.py \
+  --state-file states/cross-lingual-cot-trust.json \
+  --rejudge-existing \
+  --iters 0
+```
+
+Rescore first, then continue the loop:
+
+```bash
+uv run --env-file .env python -u main.py \
+  --state-file states/cross-lingual-cot-trust.json \
+  --rejudge-existing \
+  --iters 3
+```
+
+This re-scores existing artifacts with the current judges and updates their
+stored metrics. It does not rewrite the underlying question or answer text.
+Because each existing artifact is judged again, this can add noticeable model
+cost on larger states.
 
 ### Start A New Seeded Exploration
 
@@ -200,6 +237,9 @@ Available options:
   Repeatable starter question to bias the exploration.
 - `--replace-seed`
   Allow replacing or adding a seed on an already populated state file.
+- `--rejudge-existing`
+  Re-score existing artifacts in the selected state with the current judges
+  before running iterations.
 
 ## Seed File Format
 

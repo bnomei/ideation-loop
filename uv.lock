@@ -861,7 +861,7 @@ wheels = [
 ]
 
 [[package]]
-name = "knowledge-loop"
+name = "ideation-loop"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
