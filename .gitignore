@@ -217,4 +217,4 @@ states/*.png
 .DS_Store
 
 .frigg/
-seeds/local/
+seeds/*.json
