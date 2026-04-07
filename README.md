@@ -111,6 +111,33 @@ uv run --env-file .env python -u main.py \
 That continues the existing exploration, keeps its stored seed if it has one,
 and writes back to the same file.
 
+### Pull In Current Information With OpenAI Web Search
+
+Web search is optional and off by default. When enabled, only question
+generation and artifact drafting may use OpenAI's built-in `web_search` tool.
+The scoring and judging passes stay local to the current state.
+
+Use it when the topic benefits from fresh facts, current events, or recent
+developments:
+
+```bash
+uv run --env-file .env python -u main.py \
+  --state-file states/current-topic.json \
+  --web-search \
+  --iters 3
+```
+
+If you want to constrain search to specific sources:
+
+```bash
+uv run --env-file .env python -u main.py \
+  --state-file states/current-topic.json \
+  --web-search \
+  --web-search-domain www.anthropic.com \
+  --web-search-domain openai.com \
+  --iters 3
+```
+
 ### Rejudge An Older State With The Current Scoring Logic
 
 Use this when you want an older state to benefit from the current judges and
@@ -240,6 +267,12 @@ Available options:
 - `--rejudge-existing`
   Re-score existing artifacts in the selected state with the current judges
   before running iterations.
+- `--web-search`
+  Allow question and artifact generation to use OpenAI's built-in web search
+  tool. Off by default.
+- `--web-search-domain TEXT`
+  Repeatable allowed-domain filter for built-in web search. Requires
+  `--web-search`.
 
 ## Seed File Format
 

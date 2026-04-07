@@ -80,6 +80,7 @@ class LoopConfig:
     hazard_min_artifacts: int = 20
     hazard_every_iterations: int = 5
     hazard_drop_leaders: int = 3
+    web_search_max_tool_calls: int = 3
 
 
 CONFIG = LoopConfig()
@@ -88,6 +89,8 @@ MODEL = CONFIG.model
 EMBED_MODEL = CONFIG.embed_model
 STATE_FILE = CONFIG.state_file
 GRAPH_FILE = CONFIG.graph_file
+WEB_SEARCH_ENABLED = False
+WEB_SEARCH_ALLOWED_DOMAINS: tuple[str, ...] = ()
 
 MAX_POP = CONFIG.max_population
 TOP_CONTEXT = CONFIG.top_context
@@ -138,6 +141,16 @@ def configure_runtime_paths(
     CONFIG = replace(CONFIG, state_file=chosen_state, graph_file=chosen_graph)
     STATE_FILE = CONFIG.state_file
     GRAPH_FILE = CONFIG.graph_file
+
+
+def configure_web_search(
+    enabled: bool = False,
+    allowed_domains: Optional[List[str]] = None,
+) -> None:
+    """Set runtime web-search behavior for generation without changing defaults."""
+    global WEB_SEARCH_ENABLED, WEB_SEARCH_ALLOWED_DOMAINS
+    WEB_SEARCH_ENABLED = enabled
+    WEB_SEARCH_ALLOWED_DOMAINS = tuple(dict.fromkeys(allowed_domains or []))
 
 
 # -------------------------
@@ -472,8 +485,19 @@ def save_state(state: State, git: bool = False) -> None:
 # -------------------------
 
 
+def build_web_search_tool() -> dict[str, object]:
+    """Responses API tool config for optional built-in web search."""
+    tool: dict[str, object] = {"type": "web_search"}
+    if WEB_SEARCH_ALLOWED_DOMAINS:
+        tool["filters"] = {"allowed_domains": list(WEB_SEARCH_ALLOWED_DOMAINS)}
+    return tool
+
+
 def llm(
-    prompt: str, schema: type[StructuredSchema], tokens: int = 1000
+    prompt: str,
+    schema: type[StructuredSchema],
+    tokens: int = 1000,
+    allow_web_search: bool = False,
 ) -> StructuredSchema:
     """Call the Responses API with structured parsing and one concise retry."""
     current_prompt = prompt
@@ -481,11 +505,20 @@ def llm(
 
     for attempt in range(2):
         try:
+            request: dict[str, object] = {
+                "model": MODEL,
+                "input": current_prompt,
+                "text_format": schema,
+                "max_output_tokens": current_tokens,
+            }
+            if allow_web_search and WEB_SEARCH_ENABLED:
+                request["tools"] = [build_web_search_tool()]
+                request["tool_choice"] = "auto"
+                request["max_tool_calls"] = CONFIG.web_search_max_tool_calls
+                request["include"] = ["web_search_call.action.sources"]
+
             resp = get_client().responses.parse(
-                model=MODEL,
-                input=current_prompt,
-                text_format=schema,
-                max_output_tokens=current_tokens,
+                **request
             )
             if resp.output_parsed is None:
                 raise ValueError(f"No parsed output returned for {schema.__name__}")
@@ -1035,7 +1068,12 @@ def normalize_question_modes(questions: List[Question]) -> List[Question]:
 
 
 def gen_questions(state: State) -> List[Question]:
-    result = llm(build_question_prompt(state), QBatch, tokens=1000)
+    result = llm(
+        build_question_prompt(state),
+        QBatch,
+        tokens=1000,
+        allow_web_search=True,
+    )
     return normalize_question_modes(
         [
             Question(
@@ -1049,7 +1087,12 @@ def gen_questions(state: State) -> List[Question]:
 
 
 def gen_artifact(state: State, q: Question) -> Draft:
-    return llm(build_artifact_prompt(state, q), Draft, tokens=1800)
+    return llm(
+        build_artifact_prompt(state, q),
+        Draft,
+        tokens=1800,
+        allow_web_search=True,
+    )
 
 
 # -------------------------
@@ -1591,6 +1634,17 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Re-score existing artifacts in the selected state with the current judges before running iterations.",
     )
+    parser.add_argument(
+        "--web-search",
+        action="store_true",
+        help="Allow question and artifact generation to use OpenAI's built-in web search tool. Off by default.",
+    )
+    parser.add_argument(
+        "--web-search-domain",
+        action="append",
+        default=[],
+        help="Repeatable allowed-domain filter for built-in web search. Requires --web-search.",
+    )
 
     args = parser.parse_args()
     used_inline_seed_fields = any(
@@ -1609,6 +1663,8 @@ def parse_args() -> argparse.Namespace:
         parser.error(
             "--replace-seed requires --seed-file or inline --seed-topic input."
         )
+    if args.web_search_domain and not args.web_search:
+        parser.error("--web-search-domain requires --web-search.")
     return args
 
 
@@ -1848,6 +1904,10 @@ def run(
 if __name__ == "__main__":
     cli_args = parse_args()
     configure_runtime_paths(cli_args.state_file, cli_args.graph_file)
+    configure_web_search(
+        enabled=cli_args.web_search,
+        allowed_domains=cli_args.web_search_domain,
+    )
     try:
         run(
             iters=cli_args.iters,
