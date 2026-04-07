@@ -92,6 +92,8 @@ STATE_FILE = CONFIG.state_file
 GRAPH_FILE = CONFIG.graph_file
 WEB_SEARCH_ENABLED = False
 WEB_SEARCH_ALLOWED_DOMAINS: tuple[str, ...] = ()
+QUIET = False
+REDACT_OUTPUT = False
 
 MAX_POP = CONFIG.max_population
 TOP_CONTEXT = CONFIG.top_context
@@ -152,6 +154,13 @@ def configure_web_search(
     global WEB_SEARCH_ENABLED, WEB_SEARCH_ALLOWED_DOMAINS
     WEB_SEARCH_ENABLED = enabled
     WEB_SEARCH_ALLOWED_DOMAINS = tuple(dict.fromkeys(allowed_domains or []))
+
+
+def configure_output_safety(quiet: bool = False, redact_output: bool = False) -> None:
+    """Configure how much run-time text is echoed to logs and graphs."""
+    global QUIET, REDACT_OUTPUT
+    QUIET = quiet
+    REDACT_OUTPUT = redact_output
 
 
 def validate_runtime_config(needs_api: bool) -> None:
@@ -402,6 +411,21 @@ def lexical_similarity(a: str, b: str) -> float:
 
 def fingerprint(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def display_question_text(text: str, limit: Optional[int] = None) -> str:
+    """Return plain or redacted question text for logs and graph labels."""
+    if REDACT_OUTPUT:
+        return f"[redacted:{fingerprint(text)[:8]}]"
+    if limit is None or len(text) <= limit:
+        return text
+    return text[:limit] + "..."
+
+
+def log_info(message: str) -> None:
+    """Emit a normal progress line unless quiet mode suppresses it."""
+    if not QUIET:
+        print(message)
 
 
 # -------------------------
@@ -1436,7 +1460,7 @@ def build_graph(state: State) -> nx.DiGraph:
     g = nx.DiGraph()
 
     for a in state.artifacts:
-        label = a.question.text[:48] + ("..." if len(a.question.text) > 48 else "")
+        label = display_question_text(a.question.text, limit=48)
         g.add_node(
             a.id,
             label=label,
@@ -1639,6 +1663,16 @@ def parse_args() -> argparse.Namespace:
         help="Skip lineage graph rendering.",
     )
     parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress routine progress logs and keep only errors plus final save paths.",
+    )
+    parser.add_argument(
+        "--redact-output",
+        action="store_true",
+        help="Replace question text in progress logs and graph labels with stable redacted ids.",
+    )
+    parser.add_argument(
         "--seed-file",
         type=Path,
         help="Load a TopicSeed JSON document and persist it into the selected state file.",
@@ -1792,10 +1826,10 @@ def dedup_penalty_for_draft(state: State, draft: Draft) -> float:
 def rejudge_existing_artifacts(state: State) -> bool:
     """Re-score persisted artifacts with the current judges without regenerating content."""
     if not state.artifacts:
-        print("\nno existing artifacts to rejudge")
+        log_info("\nno existing artifacts to rejudge")
         return False
 
-    print(f"\n--- rejudging {len(state.artifacts)} existing artifacts ---")
+    log_info(f"\n--- rejudging {len(state.artifacts)} existing artifacts ---")
     original_artifacts = list(state.artifacts)
     refreshed: List[Artifact] = []
 
@@ -1829,7 +1863,7 @@ def rejudge_existing_artifacts(state: State) -> bool:
             }
         )
         refreshed.append(updated)
-        print(f"rejudged: {format_artifact_progress(updated)}")
+        log_info(f"rejudged: {format_artifact_progress(updated)}")
 
     state.artifacts = refreshed
     prune(state)
@@ -1856,7 +1890,7 @@ def process_question(
 def format_artifact_progress(artifact: Artifact) -> str:
     """Stable progress line for per-question logging."""
     return (
-        f"{artifact.question.text} -> "
+        f"{display_question_text(artifact.question.text)} -> "
         f"fate={artifact.fate:.3f} dedup={artifact.dedup:.3f} "
         f"novelty={artifact.novelty:.3f} grounding={artifact.grounding_score:.3f} "
         f"overclaim={artifact.overclaim_penalty:.3f}"
@@ -1866,7 +1900,7 @@ def format_artifact_progress(artifact: Artifact) -> str:
 def format_rejected_progress(question: Question, dedup: float) -> str:
     """Stable progress line for rejected near-duplicate drafts."""
     return (
-        f"{question.text} -> "
+        f"{display_question_text(question.text)} -> "
         f"rejected dedup={dedup:.3f} threshold={CONFIG.artifact_dedup_reject_threshold:.2f}"
     )
 
@@ -1884,7 +1918,7 @@ def persist_iteration(state: State, git: bool, render_graph: bool) -> None:
 
 def run_iteration(state: State, git: bool = False, render_graph: bool = True) -> None:
     """Run one full ideation iteration over a generated batch of questions."""
-    print(f"\n--- iteration {state.iteration} ---")
+    log_info(f"\n--- iteration {state.iteration} ---")
 
     questions = gen_questions(state)
 
@@ -1892,14 +1926,14 @@ def run_iteration(state: State, git: bool = False, render_graph: bool = True) ->
         try:
             artifact, dedup = process_question(state, question)
             if artifact is None:
-                print(format_rejected_progress(question, dedup))
+                log_info(format_rejected_progress(question, dedup))
             else:
-                print(format_artifact_progress(artifact))
+                log_info(format_artifact_progress(artifact))
         except Exception as e:
             print(f"artifact failed: {e}")
 
     if should_run_hazard(state.iteration):
-        print("hazard triggered")
+        log_info("hazard triggered")
         hazard(state)
 
     prune(state)
@@ -1953,6 +1987,10 @@ if __name__ == "__main__":
     configure_web_search(
         enabled=cli_args.web_search,
         allowed_domains=cli_args.web_search_domain,
+    )
+    configure_output_safety(
+        quiet=cli_args.quiet,
+        redact_output=cli_args.redact_output,
     )
     try:
         run(

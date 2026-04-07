@@ -271,6 +271,11 @@ Available options:
   Commit state-file updates after each save.
 - `--no-graph`
   Skip graph rendering.
+- `--quiet`
+  Suppress routine progress logs and keep only errors plus final save paths.
+- `--redact-output`
+  Replace question text in progress logs and graph labels with stable redacted
+  ids.
 - `--seed-file SEED_FILE`
   Load a JSON seed document and persist it into the selected state.
 - `--seed-topic SEED_TOPIC`
@@ -354,6 +359,10 @@ Also note:
 - the script rewrites the full state JSON on each save
 - graph rendering imports `matplotlib` and `networkx`, so first runs may spend a
   moment building local caches
+- use `--quiet` in shared shells or CI when you do not want routine prompt text
+  echoed to stdout
+- use `--redact-output` when you want logs and graph labels to stay traceable
+  without exposing question text
 
 ## Notes
 
