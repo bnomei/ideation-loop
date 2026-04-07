@@ -7,92 +7,200 @@
 [![Discord](https://flat.badgen.net/badge/discord/bnomei?color=7289da&icon=discord&label)](https://discordapp.com/users/bnomei)
 [![Buymecoffee](https://flat.badgen.net/badge/icon/donate?icon=buymeacoffee&color=FF813F&label)](https://www.buymeacoffee.com/bnomei)
 
-`ideation-loop` is a local ideation-first exploration loop runner built on
-the OpenAI API. It keeps a persistent "world state" in JSON, asks the model
-for follow-up questions, drafts structured answers, scores them for usefulness,
-grounding, reuse, and overclaiming, deduplicates similar content, and renders
-a lineage graph of the surviving artifacts.
+`ideation-loop` is a local, stateful ideation runner built on the OpenAI API.
+It keeps one exploration in a JSON file, proposes follow-up questions, drafts
+structured answers, scores them, deduplicates weak repeats, and optionally
+renders a lineage graph.
 
-This repository is for running focused ideation and exploration loops over
-time. A single state file represents one exploration.
+Use it when you want:
+
+- an exploration that improves over multiple runs instead of one-shot prompting
+- reusable structured output in JSON instead of a pile of chat transcripts
+- something easy to inspect with `jq` or feed into another AI agent
+
+It is not built for:
+
+- fact-verified research archives
+- polished narrative reports
+- retrieval over large document corpora
 
 This is a script-first local `uv` app, not a published PyPI package. Git tags
-mark source snapshots for the repository and tracked examples.
+mark repository snapshots, not PyPI releases.
 
-## How It Works
+## Quickstart
 
-```mermaid
-flowchart TD
-    start[Run main.py] --> load[Load or create state JSON]
-    load --> context[Summarize strongest artifacts and registry concepts]
-    context --> questions[Generate exploit and explore questions]
-    questions --> draft[Draft one structured artifact per question]
-    draft --> review[Score usefulness, reuse, grounding, overclaim, and dedup]
-    review --> keep{Artifact survives?}
-    keep --> update[Append artifact and update registry and reuse]
-    keep --> drop[Drop near-clone or weak draft]
-    update --> save[Write updated state JSON]
-    drop --> save
-    save --> render_graph[Optionally render lineage graph PNG]
-    render_graph --> next[Stop or run next iteration]
+Needs Python `3.9+`, `uv`, and an OpenAI API key.
+
+Run the default exploration:
+
+```bash
+uv sync --frozen
+cp .env.example .env
+uv run --env-file .env python -u main.py
 ```
 
-The loop is optimized for disciplined ideation, not truth-verification. It is
-best used to generate better frames, mechanisms, scenario ideas, and
-next-check questions rather than to build a definitive research archive.
+If you do not already have `uv`:
 
-By default:
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
 
-- the script runs `10` iterations
-- each iteration generates `3` new questions
-- state is written to `world_state.json`
-- the graph is written to `lineage_graph.png`
+`uv sync --frozen` is the supported install path for this repository. The
+checked-in `uv.lock` is part of the supported local and CI environment.
 
-## What A Run Produces
-
-The canonical output is the updated state JSON file. Stdout is only progress
-logging, and the graph PNG is only a visualization layer.
+## What You Get
 
 After a normal run you get:
 
-- an updated state file with the latest `iteration`, `artifacts`, `registry`, and optional `seed`
-- optional graph output at `lineage_graph.png` or `path/to/state_lineage_graph.png`
-- console lines showing accepted or rejected artifacts for that run
+- `world_state.json`: the canonical output for the exploration
+- `lineage_graph.png`: an optional visualization of artifact relationships
+- stdout progress lines showing accepted or rejected artifacts
 
-The runner does not emit a separate report object. If you want downstream
-automation or agent analysis, use the state JSON as the source of truth.
+For non-default runs:
 
-## What A "World State" Is
+- use `--state-file runs/foo.json` to keep live work in the git-ignored `runs/` directory
+- if `--graph-file` is omitted, the graph defaults to `runs/foo_lineage_graph.png`
+- treat `states/*.json` as checked-in examples, not your main scratch space
 
-A world state is the JSON file that stores one running exploration.
+The state file is the source of truth. Stdout is just progress logging, and
+the PNG is only a visualization layer.
 
-It contains:
+Typical shape of the saved JSON:
 
-- `iteration`: the current iteration count
-- `artifacts`: the surviving question and answer records plus their scores
-- `registry`: reusable definitions discovered during the run
-- optional `seed`: topic guidance for that exploration
+```json
+{
+  "iteration": 10,
+  "artifacts": [
+    {
+      "question": {
+        "text": "What mechanism would make this idea robust outside lab conditions?",
+        "mode": "exploit"
+      },
+      "answer": "A stronger version would rely on ...",
+      "fate": 0.81,
+      "claims": [
+        {
+          "text": "Robustness depends on explicit verification steps."
+        }
+      ]
+    }
+  ],
+  "registry": [
+    {
+      "name": "verification scaffold",
+      "meaning": "A lightweight structure that helps a user check an answer."
+    }
+  ]
+}
+```
 
-Newer runs may also persist extra epistemic fields on artifacts, such as
-evidence type, evidence strength, assumptions, a competing hypothesis, and a
-main failure case. Older state files without these fields still load normally.
-Older state files can also be rejudged with the current scoring logic by using
-`--rejudge-existing`.
+## Common Tasks
 
-Important behavior:
+### Continue A Run
 
-- a world state is a working set, not a permanent archive of everything ever generated
-- the loop prunes artifacts over time, so low-value or displaced artifacts may disappear
-- if a state has a stored `seed`, future runs of that same state continue using it
-- `explore` questions open new frames, while `exploit` questions deepen or stress-test the strongest current line
+```bash
+uv run --env-file .env python -u main.py \
+  --state-file runs/cross-lingual-cot-trust.json \
+  --iters 3
+```
 
-## Inspect Results With jq
+Use the same state file again to continue the same exploration. If that state
+already has a stored seed, it keeps using it.
 
-Because the output is structured JSON, `jq` is the ideal way to slice it for
-shell workflows and AI agents. Most agents should read a focused JSON view,
-not the entire state file.
+### Start A Seeded Run
 
-Basic run summary:
+```bash
+uv run --env-file .env python -u main.py \
+  --state-file runs/medical-calibration.json \
+  --seed-topic "Trust calibration for medical advice without visible CoT" \
+  --seed-goal "Prefer answer-level summaries and verification prompts over raw reasoning traces" \
+  --seed-include "non-expert users" \
+  --seed-include "verification scaffolds" \
+  --seed-avoid "broad AGI safety"
+```
+
+### Seed From JSON
+
+```bash
+uv run --env-file .env python -u main.py \
+  --state-file runs/cross-lingual-cot-trust.json \
+  --seed-file seed.example.json
+```
+
+### Use OpenAI Web Search
+
+Web search is optional and off by default. When enabled, only question
+generation and artifact drafting may use OpenAI's built-in `web_search` tool.
+The judging and scoring passes still operate against the current state.
+
+```bash
+uv run --env-file .env python -u main.py \
+  --state-file runs/current-topic.json \
+  --web-search \
+  --iters 3
+```
+
+Restrict web search to specific domains:
+
+```bash
+uv run --env-file .env python -u main.py \
+  --state-file runs/current-topic.json \
+  --web-search \
+  --web-search-domain www.anthropic.com \
+  --web-search-domain openai.com \
+  --iters 3
+```
+
+### Rejudge An Existing State
+
+Rescore an older state with the current scoring logic without generating new
+artifacts:
+
+```bash
+uv run --env-file .env python -u main.py \
+  --state-file runs/cross-lingual-cot-trust.json \
+  --rejudge-existing \
+  --iters 0
+```
+
+Rescore first, then continue:
+
+```bash
+uv run --env-file .env python -u main.py \
+  --state-file runs/cross-lingual-cot-trust.json \
+  --rejudge-existing \
+  --iters 3
+```
+
+### Initialize A Seeded State Without Running
+
+```bash
+uv run --env-file .env python -u main.py \
+  --state-file runs/cross-lingual-cot-trust.json \
+  --seed-file seed.example.json \
+  --iters 0
+```
+
+### Replace The Seed On A Populated State
+
+By default, the runner refuses to retarget a populated unseeded state. Use
+`--replace-seed` only when you want to intentionally repurpose an existing
+state file.
+
+```bash
+uv run --env-file .env python -u main.py \
+  --state-file runs/cross-lingual-cot-trust.json \
+  --seed-file seed.example.json \
+  --replace-seed
+```
+
+## Read Results With jq
+
+Because the canonical output is JSON, `jq` is the easiest way to inspect runs
+from the shell. It is also the best handoff format for AI agents: instead of
+feeding an agent the full state file, slice out the parts it actually needs.
+
+Basic summary:
 
 ```bash
 jq '{
@@ -158,193 +266,58 @@ jq -c '{
 }' world_state.json
 ```
 
-Use `jq -c` when you want one compact JSON object that an agent can consume
-directly without extra cleanup.
+Use `jq -c` when you want one compact JSON object that another tool or agent
+can consume directly.
 
-## Requirements
+## How It Works
 
-- `uv`
-- Python `3.9+`
-- an OpenAI API key
+High-level flow:
 
-## Release Model
-
-- use `uv sync --frozen` for reproducible local installs
-- treat `pyproject.toml` as the source of truth for the app version
-- treat Git tags such as `v0.1.0` as repository release snapshots, not PyPI releases
-
-If you do not already have `uv`:
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
+```text
+state.json
+  -> summarize strongest artifacts and registry concepts
+  -> generate a small batch of exploit and explore questions
+  -> draft one structured artifact per question
+  -> score usefulness, reuse, grounding, overclaim, and dedup
+  -> keep survivors and drop near-clones
+  -> write updated state.json
+  -> optionally render lineage_graph.png
 ```
 
-## Quickstart
+The loop is optimized for disciplined ideation, not truth-verification. It is
+best used to generate better frames, mechanisms, scenario ideas, and
+next-check questions rather than to build a definitive research archive.
 
-1. Install dependencies.
-2. Create an `.env` file with your API key.
-3. Run the default exploration.
+By default:
 
-```bash
-uv sync --frozen
-cp .env.example .env
-uv run --env-file .env python -u main.py
-```
+- the script runs `10` iterations
+- each iteration generates `3` new questions
+- the default state file is `world_state.json`
+- the default graph file is `lineage_graph.png`
 
-`uv sync --frozen` is the supported install path for this repository. The
-checked-in `uv.lock` is part of the release contract for local runs and CI.
+## What A World State Is
 
-That command will:
+A world state is the JSON file that stores one running exploration.
 
-- load or create `world_state.json`
-- run `10` iterations
-- update `lineage_graph.png`
+Core fields:
 
-## Common Workflows
+- `iteration`: current iteration count
+- `artifacts`: surviving question and answer records plus scores and metadata
+- `registry`: reusable definitions discovered during the run
+- `seed`: optional topic guidance stored with the state
 
-### Start The Default Exploration
+Important behavior:
 
-Use the repository-default state file:
+- a world state is a working set, not a permanent archive of everything ever generated
+- the loop prunes artifacts over time, so weaker artifacts may disappear
+- if a state has a stored seed, future runs of that same state continue using it
+- `explore` questions open new frames, while `exploit` questions deepen or stress-test the strongest current line
 
-```bash
-uv run --env-file .env python -u main.py
-```
+Newer runs may also persist extra epistemic fields such as evidence type,
+evidence strength, assumptions, a competing hypothesis, and a main failure
+case. Older state files without these fields still load normally.
 
-### Continue An Existing Exploration
-
-Use the same state file again.
-
-```bash
-uv run --env-file .env python -u main.py \
-  --state-file runs/cross-lingual-cot-trust.json \
-  --iters 3
-```
-
-That continues the existing exploration, keeps its stored seed if it has one,
-and writes back to the same file.
-
-### Pull In Current Information With OpenAI Web Search
-
-Web search is optional and off by default. When enabled, only question
-generation and artifact drafting may use OpenAI's built-in `web_search` tool.
-The scoring and judging passes stay local to the current state.
-
-Use it when the topic benefits from fresh facts, current events, or recent
-developments:
-
-```bash
-uv run --env-file .env python -u main.py \
-  --state-file runs/current-topic.json \
-  --web-search \
-  --iters 3
-```
-
-If you want to constrain search to specific sources:
-
-```bash
-uv run --env-file .env python -u main.py \
-  --state-file runs/current-topic.json \
-  --web-search \
-  --web-search-domain www.anthropic.com \
-  --web-search-domain openai.com \
-  --iters 3
-```
-
-### Rejudge An Older State With The Current Scoring Logic
-
-Use this when you want an older state to benefit from the current judges and
-fate scoring before you continue it.
-
-Rescore only:
-
-```bash
-uv run --env-file .env python -u main.py \
-  --state-file runs/cross-lingual-cot-trust.json \
-  --rejudge-existing \
-  --iters 0
-```
-
-Rescore first, then continue the loop:
-
-```bash
-uv run --env-file .env python -u main.py \
-  --state-file runs/cross-lingual-cot-trust.json \
-  --rejudge-existing \
-  --iters 3
-```
-
-This re-scores existing artifacts with the current judges and updates their
-stored metrics. It does not rewrite the underlying question or answer text.
-Because each existing artifact is judged again, this can add noticeable model
-cost on larger states.
-
-### Start A New Seeded Exploration
-
-Use a separate state file so you do not disturb the default run.
-
-```bash
-uv run --env-file .env python -u main.py \
-  --state-file runs/medical-calibration.json \
-  --seed-topic "Trust calibration for medical advice without visible CoT" \
-  --seed-goal "Prefer answer-level summaries and verification prompts over raw reasoning traces" \
-  --seed-include "non-expert users" \
-  --seed-include "verification scaffolds" \
-  --seed-avoid "broad AGI safety"
-```
-
-### Seed From A JSON Document
-
-Use a richer seed file when you want more explicit guidance.
-
-```bash
-uv run --env-file .env python -u main.py \
-  --state-file runs/cross-lingual-cot-trust.json \
-  --seed-file seed.example.json
-```
-
-See [`seed.example.json`](seed.example.json) for the expected shape.
-
-### Initialize A Seeded State Without Running Iterations
-
-This is useful when you want to create the state first and run it later.
-
-```bash
-uv run --env-file .env python -u main.py \
-  --state-file runs/cross-lingual-cot-trust.json \
-  --seed-file seed.example.json \
-  --iters 0
-```
-
-### Intentionally Retarget A Populated State
-
-By default, the runner refuses to apply a new seed to a populated unseeded
-state. This is a safety guard so you do not accidentally retarget the current
-`world_state.json`.
-
-If you really want to reseed an existing populated state:
-
-```bash
-uv run --env-file .env python -u main.py \
-  --state-file runs/cross-lingual-cot-trust.json \
-  --seed-file seed.example.json \
-  --replace-seed
-```
-
-## Files Written By The Script
-
-For the default run:
-
-- `world_state.json`: the persisted state for the default exploration
-- `lineage_graph.png`: the lineage graph for the default exploration
-
-For alternate state files:
-
-- `--state-file path/to/foo.json` writes state to `path/to/foo.json`
-- if `--graph-file` is omitted, the graph defaults to `path/to/foo_lineage_graph.png`
-- prefer `runs/*.json` for live local explorations; `runs/` is git-ignored
-- treat `states/*.json` as checked-in example snapshots, not your primary scratch area
-
-## CLI Reference
+## CLI Essentials
 
 Show the full help:
 
@@ -352,46 +325,30 @@ Show the full help:
 uv run --env-file .env python -u main.py --help
 ```
 
-Available options:
+The most important flags are:
 
 - `--iters ITERS`
   Number of iterations to run. Default: `10`.
-- `--state-file STATE_FILE`
+- `--state-file PATH`
   Load from and save to a different state file instead of `world_state.json`.
-- `--graph-file GRAPH_FILE`
-  Write the graph to a specific PNG path instead of the derived default.
-- `--git`
-  Commit state-file updates after each save.
+- `--seed-file PATH`
+  Load a JSON seed document and persist it into the selected state.
+- `--seed-topic TEXT`
+  Provide a seed topic inline from the CLI.
+- `--rejudge-existing`
+  Re-score existing artifacts in the selected state before running iterations.
+- `--web-search`
+  Allow question and artifact generation to use OpenAI's built-in web search tool.
+- `--web-search-domain TEXT`
+  Restrict built-in web search to specific domains. Requires `--web-search`.
 - `--no-graph`
   Skip graph rendering.
 - `--quiet`
   Suppress routine progress logs and keep only errors plus final save paths.
 - `--redact-output`
-  Replace question text in progress logs and graph labels with stable redacted
-  ids.
-- `--seed-file SEED_FILE`
-  Load a JSON seed document and persist it into the selected state.
-- `--seed-topic SEED_TOPIC`
-  Provide a seed topic inline from the CLI.
-- `--seed-goal SEED_GOAL`
-  Add a seed goal inline from the CLI.
-- `--seed-include TEXT`
-  Repeatable hint for concepts or subtopics to prefer.
-- `--seed-avoid TEXT`
-  Repeatable hint for concepts or subtopics to avoid.
-- `--seed-question TEXT`
-  Repeatable starter question to bias the exploration.
-- `--replace-seed`
-  Allow replacing or adding a seed on an already populated state file.
-- `--rejudge-existing`
-  Re-score existing artifacts in the selected state with the current judges
-  before running iterations.
-- `--web-search`
-  Allow question and artifact generation to use OpenAI's built-in web search
-  tool. Off by default.
-- `--web-search-domain TEXT`
-  Repeatable allowed-domain filter for built-in web search. Requires
-  `--web-search`.
+  Replace question text in progress logs and graph labels with stable redacted ids.
+- `--git`
+  Commit state-file updates after each save.
 
 ## Seed File Format
 
@@ -430,11 +387,11 @@ Runtime model configuration comes from environment variables:
   Optional. Defaults to `text-embedding-3-small`.
 
 The script does not load `.env` by itself. Use `uv run --env-file .env ...` if
-you want `.env` values injected into the process. Startup now validates this
-configuration early and fails before the first model call if the required
-variables are missing or empty.
+you want `.env` values injected into the process. Startup validates this
+configuration early and fails before the first model call if required values
+are missing or empty.
 
-## Costs And Runtime Characteristics
+## Costs And Runtime Notes
 
 Each question currently triggers multiple model calls:
 
@@ -450,18 +407,14 @@ Also note:
 
 - the loop keeps an in-memory embedding cache for the current process
 - the script rewrites the full state JSON on each save
-- graph rendering imports `matplotlib` and `networkx`, so first runs may spend a
-  moment building local caches
-- use `--quiet` in shared shells or CI when you do not want routine prompt text
-  echoed to stdout
-- use `--redact-output` when you want logs and graph labels to stay traceable
-  without exposing question text
+- graph rendering imports `matplotlib` and `networkx`, so first runs may spend a moment building local caches
+- use `--quiet` in shared shells or CI when you do not want routine prompt text echoed to stdout
+- use `--redact-output` when you want logs and graph labels to stay traceable without exposing question text
 
-## Notes
+## Project Notes
 
-- Use `python -u` if you want live progress lines while the loop is running.
-- A seed is stored inside the selected state file, so you do not need to pass
-  the seed again when continuing that exploration.
-- The default behavior is intentionally conservative: the existing
-  [`world_state.json`](world_state.json)
-  is not reseeded unless you explicitly opt in with `--replace-seed`.
+- use `python -u` if you want live progress lines while the loop is running
+- a seed is stored inside the selected state file, so you do not need to pass it again when continuing that exploration
+- the default behavior is intentionally conservative: an existing `world_state.json` is not reseeded unless you explicitly opt in with `--replace-seed`
+- treat `pyproject.toml` as the source of truth for the app version
+- treat Git tags such as `v0.1.0` as repository snapshots, not PyPI releases
